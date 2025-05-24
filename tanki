@@ -1,0 +1,275 @@
+from pygame import *
+from random import randint
+from math import radians, sin, cos
+from time import time as timer
+
+# Класс игрового спрайта
+class GameSprite(sprite.Sprite):
+    def __init__(self, player_image, size_x, size_y, player_x, player_y, player_speed):
+        sprite.Sprite.__init__(self)
+        self.original_image = transform.scale(image.load(player_image), (size_x, size_y))
+        self.image = self.original_image.copy()
+        self.speed = player_speed
+        self.rect = self.image.get_rect()
+        self.rect.x = player_x
+        self.rect.y = player_y
+        self.angle = 0
+        self.alternate_image = None
+
+    def change_sprite(self, new_image_path):
+        self.alternate_image = transform.scale(image.load(new_image_path), (self.rect.size))
+        self.image = self.alternate_image.copy()
+
+    def restore_sprite(self):
+        self.image = self.original_image.copy()
+
+    def tta(self, angle):
+        self.angle = angle
+        self.image = transform.rotate(self.original_image, self.angle)
+        self.rect = self.image.get_rect(center=self.rect.center)
+    
+    def reset(self):
+        app.blit(self.image, (self.rect.x, self.rect.y))
+
+# Основной класс игрока (танка)
+class Player(GameSprite):
+    def __init__(self, *args):
+        super().__init__(*args)
+        self.last_fire_time = 0  # Время последнего выстрела
+        self.reloading = False   # Флаг перезарядки
+        self.cooldown_duration = 1.5  # Длительность перезарядки в секундах
+
+    def update1(self, walls):
+        keys_pressed = key.get_pressed()
+        
+        old_position = self.rect.copy()  # Сохранение старой позиции
+        
+        if keys_pressed[K_a] and self.rect.x > 10:
+            self.rect.x -= self.speed
+            self.tta(-90)
+            
+        if keys_pressed[K_d] and self.rect.x < 1370:
+            self.rect.x += self.speed
+            self.tta(90)
+            
+        if keys_pressed[K_w] and self.rect.y > 10:
+            self.rect.y -= self.speed
+            self.tta(180)
+            if keys_pressed[K_a]:
+                self.tta(-135)
+            if keys_pressed[K_d]:
+                self.tta(135)
+                
+        if keys_pressed[K_s] and self.rect.y < 860:
+            self.rect.y += self.speed
+            self.tta(0)
+            if keys_pressed[K_a]:
+                self.tta(-45)
+            if keys_pressed[K_d]:
+                self.tta(45)
+
+        # Проверка столкновений с препятствиями
+        collision_list = sprite.spritecollide(self, walls, dokill=False)
+        if len(collision_list) > 0:
+            self.rect = old_position  # Возвращаемся назад при столкновении
+
+    def fire(self, bullets_group):
+        """Метод выстрела"""
+        current_time = timer()
+        if not self.reloading and current_time - self.last_fire_time >= self.cooldown_duration:
+            # Создание новой пули
+            bullet = Bullet(
+                'bullet.png',
+                15,
+                20,
+                self.rect.centerx,
+                self.rect.centery,
+                self.angle,
+                -15  # Скорость полета пули
+            )
+            bullets_group.add(bullet)  # Пуля добавляется в общую группу пуль
+            fire_sound.play()
+            self.last_fire_time = current_time  # Запоминаем время последнего выстрела
+        else:
+            self.reloading = True  # Начинаем процесс перезарядки
+
+    def check_reload(self):
+        """Проверка окончания процесса перезарядки"""
+        current_time = timer()
+        if self.reloading and current_time - self.last_fire_time >= self.cooldown_duration:
+            self.reloading = False  # Перезарядка закончена
+
+# Класс второго игрока (противника)
+class EnemyPlayer(Player):
+    def __init__(self, *args):
+        super().__init__(*args)
+
+    def update2(self, walls):
+        keys_pressed = key.get_pressed()
+        
+        old_position = self.rect.copy()  # Сохранение старой позиции
+        
+        if keys_pressed[K_LEFT] and self.rect.x > 10:
+            self.rect.x -= self.speed
+            self.tta(-90)
+            
+        if keys_pressed[K_RIGHT] and self.rect.x < 1370:
+            self.rect.x += self.speed
+            self.tta(90)
+            
+        if keys_pressed[K_UP] and self.rect.y > 10:
+            self.rect.y -= self.speed
+            self.tta(180)
+            if keys_pressed[K_LEFT]:
+                self.tta(-135)
+            if keys_pressed[K_RIGHT]:
+                self.tta(135)
+                
+        if keys_pressed[K_DOWN] and self.rect.y < 860:
+            self.rect.y += self.speed
+            self.tta(0)
+            if keys_pressed[K_LEFT]:
+                self.tta(-45)
+            if keys_pressed[K_RIGHT]:
+                self.tta(45)
+
+        # Проверка столкновений с препятствиями
+        collision_list = sprite.spritecollide(self, walls, dokill=False)
+        if len(collision_list) > 0:
+            self.rect = old_position  # Возвращаемся назад при столкновении
+
+# Класс пули
+class Bullet(GameSprite):
+    def __init__(self, player_image, size_x, size_y, tank_center_x, tank_center_y, angle, speed=15):
+        super().__init__(player_image, size_x, size_y, tank_center_x, tank_center_y, speed)
+        rad_angle = radians(angle + 90)
+        barrel_length = size_y / 2
+        offset_x = cos(rad_angle) * barrel_length
+        offset_y = sin(rad_angle) * barrel_length
+        start_pos_x = tank_center_x + offset_x
+        start_pos_y = tank_center_y - offset_y
+        self.rect.center = (start_pos_x, start_pos_y)
+        self.velocity_x = cos(rad_angle) * speed
+        self.velocity_y = -sin(rad_angle) * speed
+
+    def update(self):
+        """Обновляет положение пули"""
+        self.rect.x += int(self.velocity_x)
+        self.rect.y += int(self.velocity_y)
+        # Если пуля вышла за пределы экрана — удаляется
+        if (
+            self.rect.left > win_width
+            or self.rect.right < 0
+            or self.rect.bottom < 0
+            or self.rect.top > win_height
+        ):
+            self.kill()
+
+
+class Box(sprite.Sprite):
+    def __init__(self, bimage, box_x, box_y, box_width, box_height):
+        super().__init__()
+        self.original_image = transform.scale(image.load(bimage), (box_width, box_height))
+        self.image = self.original_image.copy()
+        self.rect = self.image.get_rect()
+        self.rect.x = box_x
+        self.rect.y = box_y
+
+    def draw_box(self):
+        app.blit(self.image, (self.rect.x, self.rect.y))
+
+
+f = 0
+win_height = 950
+win_width = 1450
+
+app = display.set_mode((win_width, win_height))
+display.set_caption('танки не онлайн')
+background = transform.scale(image.load("fon.png"), (win_width, win_height))
+
+player = Player('ztank.png', 70, 90, 300, win_height - 200, 20)
+enemy_player = EnemyPlayer('stank.png', 70, 90, 1100, win_height - 800, 20)
+bullets = sprite.Group()
+
+player_bullets = sprite.Group()
+enemy_bullets = sprite.Group()
+
+mixer.init()
+fire_sound = mixer.Sound('fire.ogg')  # Звук выстрела
+ded = mixer.Sound('space.ogg')
+
+font.init()
+font0 = font.Font(None, 80)
+font = font.Font(None, 36)
+game = True
+finish = False
+
+nuf = 0
+ret = False
+
+wallheight = 100
+wallwidth = 100
+
+b1 = Box('korobka.jpg', 675, 425, wallwidth, wallheight)
+b2 = Box('korobka.jpg', 1050, 550, wallwidth, wallheight)
+b3 = Box('korobka.jpg', 1050, 300, wallwidth, wallheight)
+b4 = Box('korobka.jpg', 300, 550, wallwidth, wallheight)
+b5 = Box('korobka.jpg', 300, 300, wallwidth, wallheight)
+
+walls_group = sprite.Group()  # Группу всех стен
+for box in [b1, b2, b3, b4, b5]:  
+    walls_group.add(box)      # Добавляем каждую коробку в группу стенок
+
+while game:
+    for e in event.get():
+        if e.type == QUIT:
+            game = False
+        elif e.type == KEYDOWN:
+            if e.key == K_SPACE:
+                player.fire(player_bullets)  # Стреляем первым игроком
+            if e.key == K_KP0:
+                enemy_player.fire(enemy_bullets)  # Стреляем вторым игроком
+
+    if not finish:
+        app.blit(background, (0, 0))
+        if sprite.collide_rect(player, enemy_player):
+            player.change_sprite('tank_negr.png')
+            enemy_player.change_sprite('tank_negr.png')
+            finish = True
+
+        # Обновление игроков с передачей группы стенок
+        player.update1(walls_group)
+        enemy_player.update2(walls_group)
+        
+        # Проверка попаданий пуль игрока в противников
+        hit_bullets = sprite.groupcollide(player_bullets, [enemy_player], True, False)
+        if hit_bullets:
+            enemy_player.change_sprite('tank_negr.png')
+            finish = True
+
+        # Проверка попаданий пуль противника в игрока
+        hit_bullets_enemy = sprite.groupcollide(enemy_bullets, [player], True, False)
+        if hit_bullets_enemy:
+            player.change_sprite('tank_negr.png')
+            finish = True
+
+        player_bullets.update()
+        enemy_bullets.update()
+
+        player_bullets.draw(app)
+        enemy_bullets.draw(app)
+        player.reset()
+        enemy_player.reset()
+
+        b1.draw_box()
+        b2.draw_box()
+        b3.draw_box()
+        b4.draw_box()
+        b5.draw_box()
+
+        # Убираем лишнюю проверку состояния перезарядки вне классов танков
+        # Она теперь контролируется внутри класса танка
+
+        display.update()
+
+    time.delay(50)
